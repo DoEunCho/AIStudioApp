@@ -18,10 +18,10 @@ import {
   Trash2,
   Layers
 } from 'lucide-react';
-import { ToolId, Message } from './types.ts';
-import ImageUpload from './components/ImageUpload.tsx';
-import LoadingOverlay from './components/LoadingOverlay.tsx';
-import ResultDisplay from './components/ResultDisplay.tsx';
+import { ToolId, Message } from './types';
+import ImageUpload from './components/ImageUpload';
+import LoadingOverlay from './components/LoadingOverlay';
+import ResultDisplay from './components/ResultDisplay';
 import { GoogleGenAI } from "@google/genai";
 
 const SidebarItem: React.FC<{ 
@@ -53,7 +53,6 @@ const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
-  const [originalImageUrl, setOriginalImageUrl] = useState<string | null>(null);
 
   // Form states
   const [image1, setImage1] = useState<File | null>(null);
@@ -115,7 +114,11 @@ const App: React.FC = () => {
 
     setLoading(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const apiKey = process.env.API_KEY;
+      if (!apiKey) {
+        throw new Error("API Key가 설정되지 않았습니다. Netlify 환경 변수를 확인해 주세요.");
+      }
+      const ai = new GoogleGenAI({ apiKey });
       const parts: any[] = [];
       let systemTask = "";
       
@@ -156,7 +159,7 @@ const App: React.FC = () => {
       }
     } catch (error: any) {
       console.error(error);
-      alert("오류가 발생했습니다.");
+      alert(error.message || "오류가 발생했습니다.");
     } finally {
       setLoading(false);
     }
@@ -170,7 +173,9 @@ const App: React.FC = () => {
     setChatInput("");
     
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const apiKey = process.env.API_KEY;
+      if (!apiKey) throw new Error("API Key missing");
+      const ai = new GoogleGenAI({ apiKey });
       const parts: any[] = [];
       if (image1) parts.push(await fileToPart(image1));
       parts.push({ text: `당신은 이미지 속 캐릭터입니다. 응답: ${inputForAi}` });
