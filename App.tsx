@@ -16,13 +16,19 @@ import {
   Sparkles,
   Plus,
   Trash2,
-  Layers
+  Layers,
+  Key,
+  ExternalLink,
+  AlertCircle
 } from 'lucide-react';
 import { ToolId, Message } from './types';
 import ImageUpload from './components/ImageUpload';
 import LoadingOverlay from './components/LoadingOverlay';
 import ResultDisplay from './components/ResultDisplay';
 import { GoogleGenAI } from "@google/genai";
+
+// Removed conflicting declare global block for Window.aistudio
+// as it is already defined by the environment as AIStudio.
 
 const SidebarItem: React.FC<{ 
   icon: any, 
@@ -53,6 +59,7 @@ const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
 
   const [image1, setImage1] = useState<File | null>(null);
   const [image2, setImage2] = useState<File | null>(null);
@@ -61,9 +68,29 @@ const App: React.FC = () => {
   const [option, setOption] = useState("");
   
   const [messages, setMessages] = useState<Message[]>([
-    { id: '1', sender: 'ai', text: "안녕하세요! 사진을 업로드하고 채팅을 시작해 보세요.", timestamp: new Date() }
+    { id: '1', sender: 'ai', text: "안녕하세요! 사진을 업로드하고 캐릭터와 대화를 시작해 보세요.", timestamp: new Date() }
   ]);
   const [chatInput, setChatInput] = useState("");
+
+  useEffect(() => {
+    checkApiKey();
+  }, []);
+
+  const checkApiKey = async () => {
+    try {
+      // Using type casting to access the globally injected aistudio object
+      const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+      setHasApiKey(hasKey);
+    } catch (e) {
+      setHasApiKey(false);
+    }
+  };
+
+  const handleOpenKeySelector = async () => {
+    // Using type casting to access the globally injected aistudio object
+    await (window as any).aistudio.openSelectKey();
+    setHasApiKey(true); // Assume success after dialog
+  };
 
   const fileToPart = async (file: File) => {
     return new Promise<any>((resolve, reject) => {
@@ -99,12 +126,6 @@ const App: React.FC = () => {
   };
 
   const handleGenerate = async () => {
-    const apiKey = process.env.API_KEY;
-    if (!apiKey || apiKey === "undefined") {
-      alert("API 키가 설정되지 않았습니다. Netlify 사이트 설정의 Environment variables에서 API_KEY를 추가한 후 다시 배포해 주세요.");
-      return;
-    }
-
     if (activeTab === ToolId.VirtualModelFitting || activeTab === ToolId.ItemSynthesis) {
       if (activeTab === ToolId.ItemSynthesis && !image1) { alert("인물 사진을 업로드해 주세요."); return; }
       if (itemImages.filter(img => img !== null).length === 0) { alert("최소 한 개 이상의 아이템 사진을 업로드해 주세요."); return; }
@@ -115,7 +136,8 @@ const App: React.FC = () => {
 
     setLoading(true);
     try {
-      const ai = new GoogleGenAI({ apiKey });
+      // Create a new GoogleGenAI instance right before making an API call to ensure it always uses the most up-to-date API key
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const parts: any[] = [];
       let systemTask = "";
       
@@ -143,11 +165,12 @@ const App: React.FC = () => {
       
       parts.push({ text: systemTask });
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
+        model: 'gemini-3-pro-image-preview',
         contents: { parts },
-        config: { imageConfig: { aspectRatio: "3:4" } }
+        config: { imageConfig: { aspectRatio: "3:4", imageSize: "1K" } }
       });
 
+      // Find the image part, do not assume it is the first part.
       const imagePart = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
       if (imagePart?.inlineData) {
         setResult(`data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`);
@@ -156,7 +179,12 @@ const App: React.FC = () => {
       }
     } catch (error: any) {
       console.error("AI Generation Error:", error);
-      alert(`오류 발생: ${error.message || "알 수 없는 오류가 발생했습니다."}`);
+      if (error.message?.includes("Requested entity was not found")) {
+        setHasApiKey(false);
+        alert("API 키 프로젝트가 올바르지 않습니다. 다시 선택해 주세요.");
+      } else {
+        alert(`오류 발생: ${error.message || "알 수 없는 오류가 발생했습니다."}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -164,27 +192,27 @@ const App: React.FC = () => {
 
   const handleChatSend = async () => {
     if (!chatInput.trim()) return;
-    const apiKey = process.env.API_KEY;
-    if (!apiKey) { alert("API Key missing"); return; }
-
     const userMsg: Message = { id: Date.now().toString(), sender: 'user', text: chatInput, timestamp: new Date() };
     setMessages(prev => [...prev, userMsg]);
     const inputForAi = chatInput;
     setChatInput("");
     
     try {
-      const ai = new GoogleGenAI({ apiKey });
+      // Create a new GoogleGenAI instance right before making an API call to ensure it always uses the most up-to-date API key
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const parts: any[] = [];
       if (image1) parts.push(await fileToPart(image1));
       parts.push({ text: `You are the character in the image. Reply to: ${inputForAi}` });
       const response = await ai.models.generateContent({ 
-        model: 'gemini-3-flash-preview', 
+        model: 'gemini-3-pro-preview', 
         contents: { parts } 
       });
+      // Correct extraction of text from GenerateContentResponse
       const aiMsg: Message = { id: (Date.now() + 1).toString(), sender: 'ai', text: response.text || "...", timestamp: new Date() };
       setMessages(prev => [...prev, aiMsg]);
-    } catch (error) { 
-      console.error("Chat Error:", error); 
+    } catch (error: any) { 
+      console.error("Chat Error:", error);
+      if (error.message?.includes("Requested entity was not found")) setHasApiKey(false);
     }
   };
 
@@ -216,6 +244,43 @@ const App: React.FC = () => {
 
   const currentTool = tools.find(t => t.id === activeTab);
 
+  if (hasApiKey === false) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-[#030712] p-6 text-white">
+        <div className="glass max-w-md w-full p-10 rounded-3xl border border-indigo-500/30 text-center shadow-2xl">
+          <div className="w-20 h-20 bg-indigo-600/20 rounded-2xl flex items-center justify-center mx-auto mb-8 border border-indigo-500/40">
+            <Key className="text-indigo-400" size={40} />
+          </div>
+          <h1 className="text-2xl font-bold mb-4">API 키가 필요합니다</h1>
+          <p className="text-gray-400 text-sm mb-8 leading-relaxed">
+            AI 스튜디오의 고성능 모델을 사용하려면 본인의 구글 유료 프로젝트 API 키가 필요합니다. 과금은 선택하신 프로젝트의 설정에 따라 발생합니다.
+          </p>
+          <div className="space-y-4">
+            <button 
+              onClick={handleOpenKeySelector}
+              className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 rounded-xl font-bold flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-indigo-600/30"
+            >
+              API 키 선택하기
+            </button>
+            <a 
+              href="https://ai.google.dev/gemini-api/docs/billing" 
+              target="_blank" 
+              className="flex items-center justify-center gap-2 text-xs text-gray-500 hover:text-indigo-400 transition-colors"
+            >
+              결제 및 요금 정책 안내 <ExternalLink size={12} />
+            </a>
+          </div>
+          <div className="mt-10 p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-3 text-left">
+            <AlertCircle className="text-red-400 shrink-0 mt-0.5" size={16} />
+            <p className="text-[11px] text-red-300/80 leading-relaxed">
+              공유 받은 앱을 사용할 때 자신의 유료 프로젝트 키를 사용하면 보안이 유지되며 귀하의 계정 할당량만 사용됩니다.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen w-full bg-[#030712] text-gray-100 font-sans">
       {loading && <LoadingOverlay />}
@@ -232,6 +297,14 @@ const App: React.FC = () => {
               <SidebarItem key={tool.id} icon={tool.icon} label={isSidebarOpen ? tool.label : ''} active={activeTab === tool.id} onClick={() => setActiveTab(tool.id)} />
             ))}
           </nav>
+          <div className="p-4 border-t border-white/5">
+            <button 
+              onClick={handleOpenKeySelector}
+              className="w-full py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[10px] text-gray-400 flex items-center justify-center gap-2 transition-colors"
+            >
+              <Key size={12} /> {isSidebarOpen ? 'API 키 다시 선택' : ''}
+            </button>
+          </div>
         </div>
       </aside>
       <main className="flex-1 flex flex-col overflow-hidden">
