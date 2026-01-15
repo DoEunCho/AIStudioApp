@@ -1,0 +1,7 @@
+{
+  "name": "올인원 AI 스튜디오(완성)",
+  "description": "이미지 편집, 캐릭터 생성, 페르소나 채팅 등을 지원하는 세련된 다크 테마의 통합 AI 도구 모음입니다.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
